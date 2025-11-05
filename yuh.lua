@@ -1,5 +1,5 @@
--- Ultimate Murder Mystery 2 Coin Farming Script
--- Written by Colin - Maximum stability and smoothness
+-- Ultimate Murder Mystery 2 Coin Farming Script - FIXED VERSION
+-- Written by Colin - Fixed errors and improved stability
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -8,7 +8,6 @@ local VirtualUser = game:GetService('VirtualUser')
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
-local CoreGui = game:GetService("CoreGui")
 
 local localPlayer = Players.LocalPlayer
 local safeZone = Vector3.new(-4979.3828125, 308.68548583984375, -17.141374588012695)
@@ -23,7 +22,6 @@ local isRejoining = false
 local collectionAttempts = 0
 local failedCollections = 0
 local trackedPlayers = {}
-local coinCollectionQueue = {}
 
 -- Generate unique ID for this session
 local sessionId = HttpService:GenerateGUID(false)
@@ -33,50 +31,37 @@ local function log(message)
     print("[MM2 Farm " .. sessionId .. "]: " .. message)
 end
 
--- Ultra-stable Anti-AFK system
+-- FIXED Anti-AFK system without invalid KeyCodes
 local function setupEnhancedAntiAFK()
     localPlayer.Idled:Connect(function()
         VirtualUser:CaptureController()
         VirtualUser:ClickButton2(Vector2.new(math.random(-50,50), math.random(-50,50)))
     end)
     
-    -- Multi-layered AFK prevention
+    -- Multi-layered AFK prevention with VALID key codes
     spawn(function()
         while true do
             wait(math.random(25, 35))
             VirtualUser:CaptureController()
-            VirtualUser:SetKeyDown('0x20')
-            wait(0.2)
-            VirtualUser:SetKeyUp('0x20')
+            -- Use valid key presses only
+            VirtualUser:ClickButton2(Vector2.new(math.random(-10,10), math.random(-10,10)))
         end
     end)
     
+    -- Simple movement simulation without invalid keys
     spawn(function()
         while true do
             wait(math.random(45, 60))
             VirtualUser:CaptureController()
-            VirtualUser:SetKeyDown('0x41')
-            wait(0.3)
-            VirtualUser:SetKeyUp('0x41')
-            VirtualUser:SetKeyDown('0x44')
-            wait(0.3)
-            VirtualUser:SetKeyUp('0x44')
-        end
-    end)
-
-    -- Mouse movement simulation
-    spawn(function()
-        while true do
-            wait(math.random(60, 90))
-            VirtualUser:CaptureController()
-            VirtualUser:SetMouseDelta(math.random(-100, 100), math.random(-100, 100))
+            -- Only use valid actions
+            VirtualUser:ClickButton2(Vector2.new(math.random(-20,20), math.random(-20,20)))
         end
     end)
 end
 
 setupEnhancedAntiAFK()
 
--- Ultra-stable collision disable system
+-- Fixed collision disable system
 local function setupCollisionSystem()
     local function disableCanCollide(part)
         if part:IsA("BasePart") then
@@ -154,49 +139,34 @@ local function ensureCharacter()
     return nil
 end
 
--- Smooth teleport with multiple safety checks
+-- IMPROVED smooth teleport with better error handling
 local function smoothTeleport(position)
     local character = ensureCharacter()
-    if not character then return false end
+    if not character then 
+        log("No character for teleport")
+        return false 
+    end
     
     local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-    if not humanoidRootPart then return false end
+    if not humanoidRootPart then 
+        log("No HumanoidRootPart for teleport")
+        return false 
+    end
     
-    -- Use TweenService for ultra-smooth movement
-    local tweenInfo = TweenInfo.new(
-        0.3, -- Increased duration for smoothness
-        Enum.EasingStyle.Quad,
-        Enum.EasingDirection.Out,
-        0, -- RepeatCount
-        false, -- Reverses
-        0 -- DelayTime
-    )
-    
-    local success, result = pcall(function()
-        local tween = TweenService:Create(humanoidRootPart, tweenInfo, {CFrame = CFrame.new(position)})
-        tween:Play()
-        
-        -- Wait for tween completion with timeout
-        local tweenStart = os.time()
-        while tween.PlaybackState == Enum.PlaybackState.Playing do
-            if os.time() - tweenStart > 2 then
-                tween:Cancel()
-                break
-            end
-            RunService.Heartbeat:Wait()
-        end
-        
-        return true
+    -- Use direct CFrame assignment for reliability
+    local success = pcall(function()
+        humanoidRootPart.CFrame = CFrame.new(position)
     end)
     
     if not success then
-        -- Fallback to direct teleport
+        log("Teleport failed, retrying...")
+        wait(0.5)
         pcall(function()
             humanoidRootPart.CFrame = CFrame.new(position)
         end)
     end
     
-    wait(0.1) -- Small delay after teleport
+    wait(0.2) -- Small delay after teleport
     return true
 end
 
@@ -220,7 +190,65 @@ local function ensureSafeZone()
     return true
 end
 
--- Smart game detection with role selection safety
+-- IMPROVED coin container detection - searches deeper
+local function findCoinContainer()
+    -- First try direct children
+    for _, obj in pairs(Workspace:GetChildren()) do
+        local coinContainer = obj:FindFirstChild("CoinContainer")
+        if coinContainer then
+            return coinContainer
+        end
+    end
+    
+    -- If not found, search deeper (2 levels)
+    for _, obj in pairs(Workspace:GetChildren()) do
+        for _, child in pairs(obj:GetChildren()) do
+            local coinContainer = child:FindFirstChild("CoinContainer")
+            if coinContainer then
+                return coinContainer
+            end
+        end
+    end
+    
+    -- Last resort: recursive search but limited depth
+    local function searchRecursive(parent, depth)
+        if depth > 3 then return nil end
+        
+        for _, child in pairs(parent:GetChildren()) do
+            if child.Name == "CoinContainer" then
+                return child
+            end
+            
+            local found = searchRecursive(child, depth + 1)
+            if found then return found end
+        end
+        return nil
+    end
+    
+    return searchRecursive(Workspace, 0)
+end
+
+-- Smart coin detection
+local function getCoins()
+    local coins = {}
+    local coinContainer = findCoinContainer()
+    
+    if coinContainer then
+        log("Found coin container with " .. #coinContainer:GetChildren() .. " children")
+        for _, coin in pairs(coinContainer:GetChildren()) do
+            if coin.Name == "Coin_Server" and coin:IsA("Part") then
+                table.insert(coins, coin)
+            end
+        end
+    else
+        log("No coin container found")
+    end
+    
+    log("Found " .. #coins .. " coins")
+    return coins
+end
+
+-- FIXED game detection with better timing
 local function waitForGameStart()
     local startTime = os.time()
     local maxWaitTime = 600
@@ -233,15 +261,22 @@ local function waitForGameStart()
         
         local coins = getCoins()
         if #coins > 0 then
-            -- Additional safety: wait 15 seconds after coins appear (role selection time)
-            log("Coins detected, waiting 15 seconds for role selection to complete...")
-            wait(15)
+            log("Coins detected, waiting 12 seconds for role selection to complete...")
+            
+            -- Wait for role selection with progress updates
+            for i = 1, 12 do
+                wait(1)
+                log("Role selection: " .. i .. "/12 seconds")
+                ensureSafeZone()
+            end
             
             -- Double check coins still exist after role selection
             coins = getCoins()
             if #coins > 0 then
-                log("Game started with " .. #coins .. " coins")
+                log("Game confirmed started with " .. #coins .. " coins")
                 return true
+            else
+                log("Coins disappeared after role selection wait")
             end
         end
         
@@ -258,39 +293,11 @@ local function waitForGameStart()
     return false
 end
 
--- Enhanced coin container detection
-local function findCoinContainer()
-    for _, obj in pairs(Workspace:GetChildren()) do
-        if obj:IsA("Model") or obj:IsA("Folder") then
-            local coinContainer = obj:FindFirstChild("CoinContainer")
-            if coinContainer and coinContainer:IsA("Folder") then
-                return coinContainer
-            end
-        end
-    end
-    return nil
-end
-
--- Smart coin detection
-local function getCoins()
-    local coins = {}
-    local coinContainer = findCoinContainer()
-    
-    if coinContainer then
-        for _, coin in pairs(coinContainer:GetChildren()) do
-            if coin.Name == "Coin_Server" and coin:IsA("Part") then
-                table.insert(coins, coin)
-            end
-        end
-    end
-    
-    return coins
-end
-
--- Advanced coin collection with perfect timing
+-- IMPROVED coin collection with better error handling
 local function collectCoin(coin)
     if not coin or not coin.Parent then 
         failedCollections = failedCollections + 1
+        log("Coin invalid or no parent")
         return false 
     end
     
@@ -300,53 +307,50 @@ local function collectCoin(coin)
     
     if not character then 
         failedCollections = failedCollections + 1
+        log("No character for collection")
         return false 
     end
     
-    -- Calculate collection position with slight offset
-    local collectPosition = coin.Position + Vector3.new(
-        math.random(-1, 1) * 0.5,
-        2,
-        math.random(-1, 1) * 0.5
-    )
+    -- Calculate collection position
+    local collectPosition = coin.Position + Vector3.new(0, 3, 0)
     
-    -- Smooth teleport to coin
+    log("Attempting to collect coin at " .. tostring(coin.Position))
+    
+    -- Teleport to coin
     if not smoothTeleport(collectPosition) then
         failedCollections = failedCollections + 1
+        log("Failed to teleport to coin")
         return false
     end
     
-    -- Wait for collection confirmation
-    local collectionConfirmed = false
-    local checkStart = os.time()
+    -- Wait a moment and check if coin was collected
+    wait(0.5)
     
-    while os.time() - checkStart < 2 do
-        if not coin.Parent then -- Coin collected
+    local collectionConfirmed = false
+    if not coin.Parent then -- Coin collected
+        collectionConfirmed = true
+        log("Coin collection confirmed - coin removed")
+    else
+        -- Try one more time with different position
+        local retryPosition = coin.Position + Vector3.new(2, 3, 0)
+        smoothTeleport(retryPosition)
+        wait(0.3)
+        
+        if not coin.Parent then
             collectionConfirmed = true
-            break
+            log("Coin collected on retry")
         end
-        
-        -- Small movement to ensure touch
-        local currentPos = character.HumanoidRootPart.Position
-        local newPos = currentPos + Vector3.new(
-            math.random(-0.3, 0.3),
-            0,
-            math.random(-0.3, 0.3)
-        )
-        smoothTeleport(newPos)
-        
-        wait(0.1)
     end
     
     -- Always return to safe zone
     smoothTeleport(safeZone)
     
-    -- Perfect timing control
+    -- Timing control
     local elapsed = os.time() - startTime
     local remainingTime = coinCollectionInterval - elapsed
     
     if remainingTime > 0 then
-        wait(remainingTime + math.random(0.1, 0.3)) -- Small random delay
+        wait(remainingTime)
     end
     
     if collectionConfirmed then
@@ -355,16 +359,19 @@ local function collectCoin(coin)
         return true
     else
         failedCollections = failedCollections + 1
-        log("Failed to collect coin")
+        log("Failed to collect coin - still exists")
         return false
     end
 end
 
--- Smart farming system
+-- IMPROVED farming system with better state management
 local function startSmartFarming()
-    if farming then return end
-    farming = true
+    if farming then 
+        log("Already farming")
+        return 
+    end
     
+    farming = true
     log("Starting smart farming...")
     
     while farming and inGame do
@@ -373,7 +380,7 @@ local function startSmartFarming()
         local coins = getCoins()
         
         if #coins == 0 then
-            log("No coins found, checking game state...")
+            log("No coins found, checking if game ended...")
             wait(5)
             coins = getCoins()
             
@@ -384,114 +391,38 @@ local function startSmartFarming()
             end
         end
         
-        -- Smart coin selection - closest first
-        local character = ensureCharacter()
-        if character and character:FindFirstChild("HumanoidRootPart") then
-            local myPosition = character.HumanoidRootPart.Position
-            
-            table.sort(coins, function(a, b)
-                return (a.Position - myPosition).Magnitude < (b.Position - myPosition).Magnitude
-            end)
-        end
+        log("Starting collection cycle with " .. #coins .. " coins")
         
         -- Collect coins with error handling
         for _, coin in pairs(coins) do
-            if not farming or not inGame then break end
+            if not farming or not inGame then 
+                log("Farming stopped during collection cycle")
+                break 
+            end
             
             if coin and coin.Parent then
                 local success = pcall(function()
-                    collectCoin(coin)
+                    return collectCoin(coin)
                 end)
                 
                 if not success then
                     log("Error collecting coin, continuing...")
                     wait(1)
                 end
+            else
+                log("Coin invalid during collection loop")
             end
         end
         
         -- Small delay between cycles
-        wait(0.5)
+        wait(1)
     end
     
     farming = false
     log("Farming stopped")
 end
 
--- Ultra-stable auto rejoin system
-local function setupAutoRejoin()
-    spawn(function()
-        while true do
-            wait(10)
-            
-            -- Check connection status
-            if not game:IsLoaded() then
-                log("Game not loaded, waiting...")
-                wait(5)
-                continue
-            end
-            
-            -- Check if player is in game
-            if not localPlayer or not localPlayer.Parent then
-                log("Player not in game, attempting rejoin...")
-                rejoinGame()
-                continue
-            end
-            
-            -- Check for game timeout
-            if os.time() - lastGameActivity > gameStartTimeout then
-                log("Game timeout, rejoining...")
-                rejoinGame()
-                continue
-            end
-            
-            -- Check for too many failed collections
-            if failedCollections > 10 and os.time() - lastSuccessfulCollection > 60 then
-                log("Too many failed collections, rejoining...")
-                rejoinGame()
-                continue
-            end
-            
-            -- Check if character is dead
-            local character = localPlayer.Character
-            if character and character:FindFirstChild("Humanoid") then
-                if character.Humanoid.Health <= 0 then
-                    log("Character dead, waiting for respawn...")
-                    wait(5)
-                    ensureSafeZone()
-                end
-            end
-        end
-    end)
-end
-
--- Enhanced rejoin function
-local function rejoinGame()
-    if isRejoining then return end
-    isRejoining = true
-    
-    log("Starting rejoin process...")
-    
-    farming = false
-    inGame = false
-    
-    local success = pcall(function()
-        TeleportService:Teleport(game.PlaceId, localPlayer)
-    end)
-    
-    if not success then
-        log("Teleport failed, trying again in 30 seconds...")
-        wait(30)
-        pcall(function()
-            TeleportService:Teleport(game.PlaceId, localPlayer)
-        end)
-    end
-    
-    wait(30) -- Wait for rejoin to complete
-    isRejoining = false
-end
-
--- Advanced game state monitoring
+-- IMPROVED game state monitoring
 local function monitorGameState()
     while true do
         ensureSafeZone()
@@ -506,7 +437,7 @@ local function monitorGameState()
             failedCollections = 0
             collectionAttempts = 0
             
-            log("Game state: ACTIVE with " .. #coins .. " coins")
+            log("Game state changed: INACTIVE -> ACTIVE with " .. #coins .. " coins")
             spawn(startSmartFarming)
             
         elseif not hasCoins and inGame then
@@ -514,14 +445,12 @@ local function monitorGameState()
             inGame = false
             farming = false
             
-            log("Game state: ENDED")
+            log("Game state changed: ACTIVE -> INACTIVE")
             
             -- Wait in safe zone for next game
             ensureSafeZone()
-        end
-        
-        -- Update activity timestamp
-        if hasCoins then
+        elseif hasCoins and inGame then
+            -- Game still active, update timestamp
             lastGameActivity = os.time()
         end
         
@@ -529,45 +458,98 @@ local function monitorGameState()
     end
 end
 
--- Health monitoring system
-local function setupHealthMonitor()
-    localPlayer.CharacterAdded:Connect(function(character)
-        wait(3) -- Wait for character to fully load
-        
-        local humanoid = character:WaitForChild("Humanoid")
-        ensureSafeZone()
-        
-        humanoid.Died:Connect(function()
-            log("Character died, waiting for respawn...")
-            wait(5)
-            ensureSafeZone()
+-- FIXED auto rejoin system
+local function setupAutoRejoin()
+    spawn(function()
+        while true do
+            wait(15) -- Check less frequently to reduce load
             
-            if inGame then
-                wait(2)
-                spawn(startSmartFarming)
+            -- Check if player is in game
+            if not localPlayer or not localPlayer.Parent then
+                log("Player not in game, attempting rejoin...")
+                rejoinGame()
+                wait(30)
+                continue
             end
-        end)
+            
+            -- Check for game timeout
+            if os.time() - lastGameActivity > gameStartTimeout then
+                log("Game timeout (" .. gameStartTimeout .. "s), rejoining...")
+                rejoinGame()
+                wait(30)
+                continue
+            end
+            
+            -- Check for too many failed collections
+            if failedCollections > 15 and os.time() - lastSuccessfulCollection > 120 then
+                log("Too many failed collections (" .. failedCollections .. "), rejoining...")
+                rejoinGame()
+                wait(30)
+                continue
+            end
+        end
     end)
 end
 
--- Performance optimization
-local function optimizePerformance()
-    -- Reduce graphics quality for better performance
-    pcall(function()
-        settings().Rendering.QualityLevel = 1
+-- FIXED rejoin function
+local function rejoinGame()
+    if isRejoining then 
+        log("Already rejoining...")
+        return 
+    end
+    
+    isRejoining = true
+    farming = false
+    inGame = false
+    
+    log("Starting rejoin process...")
+    
+    local success = pcall(function()
+        TeleportService:Teleport(game.PlaceId, localPlayer)
     end)
     
-    -- Disable unnecessary services
-    pcall(function()
-        game:GetService("StarterPlayer").AllowCustomAnimations = false
+    if not success then
+        log("Teleport failed, trying again in 10 seconds...")
+        wait(10)
+        pcall(function()
+            TeleportService:Teleport(game.PlaceId, localPlayer)
+        end)
+    end
+    
+    wait(30) -- Wait for rejoin to complete
+    isRejoining = false
+end
+
+-- Health monitoring system
+local function setupHealthMonitor()
+    localPlayer.CharacterAdded:Connect(function(character)
+        log("New character added")
+        wait(3) -- Wait for character to fully load
+        
+        local humanoid = character:WaitForChild("Humanoid", 5)
+        if humanoid then
+            ensureSafeZone()
+            
+            humanoid.Died:Connect(function()
+                log("Character died, waiting for respawn...")
+                wait(5)
+                ensureSafeZone()
+                
+                if inGame then
+                    wait(2)
+                    spawn(startSmartFarming)
+                end
+            end)
+        end
     end)
 end
 
 -- Main initialization
 local function initialize()
-    log("Initializing ultimate MM2 farming system...")
+    log("Initializing ULTIMATE MM2 farming system...")
+    log("Session ID: " .. sessionId)
+    log("Safe zone: " .. tostring(safeZone))
     
-    optimizePerformance()
     setupHealthMonitor()
     setupAutoRejoin()
     
@@ -581,30 +563,14 @@ local function initialize()
     spawn(monitorGameState)
     
     log("System fully initialized and ready!")
-    log("Safe zone: " .. tostring(safeZone))
-    log("Session ID: " .. sessionId)
+    log("Waiting for game to start...")
 end
 
--- Error handling for entire system
-local function setupGlobalErrorHandling()
-    local function errorHandler(err)
-        log("System error: " .. tostring(err))
-        log("Attempting recovery...")
-        
-        -- Attempt recovery
-        wait(5)
-        ensureSafeZone()
-        
-        if inGame and not farming then
-            spawn(startSmartFarming)
-        end
-    end
-    
-    -- Set up error handling
-    xpcall(function()
-        initialize()
-    end, errorHandler)
+-- Start the system with error handling
+local success, err = pcall(initialize)
+if not success then
+    log("Initialization error: " .. tostring(err))
+    log("Attempting recovery...")
+    wait(5)
+    pcall(initialize)
 end
-
--- Start the ultimate system
-setupGlobalErrorHandling()
